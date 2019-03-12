@@ -1,26 +1,90 @@
-#! /usr/bin/python
+from os.path import realpath, isfile, join
+from os import makedirs
+import WallhavenApi
+import argparse
+import ctypes
 
-import sys, random, WallhavenApi, ctypes, urllib3
 
-urllib3.disable_warnings()
+def get_filename(path: str) -> str:
+    """
+    Recebe um caminho e retorna o caminho do arquivo a ser baixado.
+    """
+    path = realpath(path)
+    if isfile(path):
+        return path
 
-search_term, resolutions, is_sfw, category, wallpaper_path = sys.argv[1:]
+    try:
+        makedirs(path)
+    except FileExistsError:
+        pass
 
-api_parameters = { "sorting": "random", "page": 1 }
-api_parameters["resolutions"] = resolutions
-api_parameters["purity_" + is_sfw] = True
-api_parameters["category_" + category] = True
-api_parameters["search_query"] = search_term
+    return join(path, 'Wallpaper.jpg')
 
-wallhaven = WallhavenApi.WallhavenApi(verify_connection=True)
-new_wallpaper = random.choice(wallhaven.get_images_numbers(**api_parameters))
-wallpaper_url = wallhaven.get_image_short_url(image_number=new_wallpaper)
 
-with open("wallpaper_log.txt", 'r+') as logfile:
-	content = logfile.readlines()
-	content.append(wallpaper_url + '\n')
-	logfile.writelines(content)
+def main():
+    parser = argparse.ArgumentParser(
+        description=('Baixa um wallpaper aleatório do Wallhaven e o define '
+                     'como seu wallpaper.'))
+    parser.add_argument(
+        '-s', '--search', required=True, help='Termo de busca.')
+    parser.add_argument(
+        '-r',
+        '--resolution',
+        metavar=('width', 'height'),
+        type=int,
+        nargs=2,
+        required=True,
+        help='Resolução do wallpaper.')
+    parser.add_argument(
+        '-o',
+        '--output',
+        required=True,
+        help='Caminho do arquivo que será baixado.')
+    parser.add_argument(
+        '-c',
+        '--category',
+        choices=['general', 'anime', 'people'],
+        default='general',
+        help='Categoria do wallpaper.')
+    parser.add_argument(
+        '-nsfw', action='store_true', help='Busca inclusive conteúdo NSFW.')
+    parser.add_argument(
+        '-set',
+        action='store_true',
+        help='Definir ou não o arquivo baixado como wallpaper.')
+    args = parser.parse_args()
 
-wallhaven.download_image(image_number=new_wallpaper, file_path=wallpaper_path)
+    params = {
+        'sorting': 'random',
+        'page': 1,
+        'resolutions': 'x'.join(map(str, args.resolution)),
+        'purity_nsfw': args.nsfw,
+        'purity_sfw': not args.nsfw,
+        'search_query': args.search,
+        'category_' + args.category: True
+    }
 
-ctypes.windll.user32.SystemParametersInfoW(20, 0, wallpaper_path, 0)
+    w_api = WallhavenApi.WallhavenApi(verify_connection=True)
+    w_ids = w_api.get_images_numbers(**params)
+    w_path = get_filename(args.output)
+
+    try:
+        w_api.download_image(image_number=w_ids[0], file_path=w_path)
+    except IndexError:
+        print('A busca não retornou resultados.')
+        raise
+    except Exception:
+        print('Ocorreu um erro inesperado ao baixar o wallpaper.')
+        raise
+    else:
+        print('Wallpaper baixado com sucesso.')
+
+    if args.set:
+        try:
+            ctypes.windll.user32.SystemParametersInfoW(20, 0, w_path, 0)
+        except Exception:
+            print('Não foi possível alterar o wallpaper do sistema.')
+
+
+if __name__ == '__main__':
+    main()
